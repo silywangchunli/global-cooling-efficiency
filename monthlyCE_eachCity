@@ -1,3 +1,13 @@
+## ----------------------------------
+# Title: Fraction-dependent variations in cooling efficiency of urban trees across global cities
+# Objective: To visualize how TCE change with tree cover and Ta
+# Created by: Chunli Wang
+# Created on: 2023-12-5
+# Copyright (c) Chunli Wang, 2023
+# Nanjing University
+# Email: zhaojiacheng@mail.bnu.edu.cn
+## ----------------------------------
+
 var global_urban = ee.FeatureCollection("projects/ee-daisywangcl1/assets/sim_urbanization_1990-2000S").sort('ORIG_FID').select('ORIG_FID');
 print(global_urban,'global_urban');
 Map.addLayer(global_urban,{},'global_urban');
