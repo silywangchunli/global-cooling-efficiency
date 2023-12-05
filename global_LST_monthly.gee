@@ -1,4 +1,12 @@
-
+## ----------------------------------
+# Title: Fraction-dependent variations in cooling efficiency of urban trees across global cities
+# Objective: To calculate the montly LST across global cities
+# Created by: Chunli Wang
+# Created on: 2023-12-5
+# Copyright (c) Chunli Wang, 2023
+# Nanjing University
+# Email: chunliwayi@foxmail.com
+## ----------------------------------
 
 
 var global_urban = ee.FeatureCollection("projects/ee-daisywangcl1/assets/sim_urbanization_1990-2000S").sort('ORIG_FID').select('ORIG_FID');
