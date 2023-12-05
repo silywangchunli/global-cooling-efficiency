@@ -1,0 +1,580 @@
+
+
+
+var global_urban = ee.FeatureCollection("projects/ee-daisywangcl1/assets/sim_urbanization_1990-2000S").sort('ORIG_FID').select('ORIG_FID');
+print(global_urban,'global_urban');
+Map.addLayer(global_urban,{},'global_urban');
+
+//添加MCD12Q1的500m分辨率的landcover yearly数据(去掉水、雪和冰、永久性湿地的像元)
+var igbpLandCover = ee.Image('MODIS/006/MCD12Q1/2012_01_01').select('LC_Type1');
+var wetlandMask=igbpLandCover.neq(11);
+var snowMask=igbpLandCover.neq(15);
+var waterMask=igbpLandCover.neq(17);
+var mask=wetlandMask.add(snowMask).add(waterMask);
+
+// var igbpLandCover = igbpLandCover.updateMask(igbpLandCover.neq(11));   //mask wetland
+// var igbpLandCover = igbpLandCover.updateMask(igbpLandCover.neq(15));   //mask snow and ice
+// var igbpLandCover = igbpLandCover.updateMask(igbpLandCover.neq(17));   //mask water
+
+//添加GTOPO30数据(30 arc seconds (approximately 1 kilometer))
+var elevation = ee.Image('USGS/GTOPO30').select('elevation');
+var elevation = elevation.resample("bilinear");
+print('elevation',elevation);
+
+//Map.addLayer(elevation,{max:9000,min:-500},'dem');
+var start_year = 2018;   //change
+var end_year = 2020;     //change
+
+// Load the input image collection: projected climate data.
+var LST = ee.ImageCollection('MODIS/006/MYD11A1')
+            .filterDate(start_year+'-01-01', end_year+'-12-31')
+            .select(['LST_Day_1km','LST_Night_1km']);
+            //.filterBounds(roi);
+print('LST',LST);
+
+var QA = LST.select('QC_Day');   //QC_Night
+// Map.centerObject(global_urban,4);
+// Map.addLayer(QA.first().clip(global_urban),{},'QC_Day');
+// Map.addLayer(QA.first().clip(global_urban),{},'QC_Night');
+
+
+var trueColor143 =
+    LST.select(['LST_Day_1km', 'LST_Night_1km']);
+var trueColor143Vis = {
+  min: 0,
+  max: 65535.0,
+};
+
+function maskclouds(image) {
+  var qa = image.select('QC_Day');
+  // 去云 cloud
+  var cloudBitMask = 1 << 10;
+  var mask = qa.bitwiseAnd(cloudBitMask).eq(0)
+  // 去云阴影 cloud shadow
+  var shadowBitMask = 1 << 2;
+  var shadowMask = qa.bitwiseAnd(shadowBitMask).eq(0);
+  mask = mask.and(shadowMask);
+  // 去云附近的像素 Pixel is adacent to cloud
+  var adjacentBitMask = 1 << 13;
+  var adjacentMask = qa.bitwiseAnd(adjacentBitMask).eq(0);
+  mask = mask.and(adjacentMask);
+  // 去雪 show
+  var snowBitMask = 1 << 15;
+  var snowMask = qa.bitwiseAnd(snowBitMask).eq(0);
+  mask = mask.and(snowMask);
+  return image.updateMask(mask);
+}
+ 
+var NoCloud = LST.map(maskclouds).select(['LST_Day_1km', 'LST_Night_1km']);
+ 
+// Map.centerObject(global_urban, 4)
+// Map.addLayer(NoCloud.first().clip(global_urban),trueColor143Vis,'NoCloud');
+// print ('NoCloud',NoCloud)
+
+
+var NDVI = ee.ImageCollection("MODIS/006/MOD13A1")
+           .filterDate(start_year+'-01-01', end_year+'-12-31').select(['NDVI','EVI'])
+          //.select('NDVI').median();
+// print('NDVI',NDVI);
+var EVI = ee.ImageCollection("MODIS/006/MOD13A1")
+           .filterDate(start_year+'-01-01', end_year+'-12-31').select('EVI')//.select(['NDVI','EVI'])
+          //.select('NDVI').median();
+// print('NDVI',NDVI);
+
+var Albedo = ee.ImageCollection("MODIS/006/MCD43C3")
+           .filterDate(start_year+'-01-01', end_year+'-12-31')
+           .select(['Albedo_BSA_shortwave','Albedo_WSA_shortwave'])
+// print('Albedo',Albedo); 
+
+var meanWSA = Albedo.map(function(image){
+  meanWSA = image.select('Albedo_BSA_shortwave').add(image.select('Albedo_WSA_shortwave'))
+                                             .divide(2).rename('meanWSA')
+  return image.addBands(meanWSA)
+})
+// print('meanWSA',meanWSA)
+
+var projection = LST.first().projection()
+var VCF = ee.ImageCollection('MODIS/006/MOD44B').filterDate(start_year+'-01-01', end_year+'-12-31')
+        .select(['Percent_Tree_Cover','Percent_NonTree_Vegetation','Percent_NonVegetated']);
+// print ('VCF',VCF);
+
+// var VCF_tree =  ee.ImageCollection('MODIS/006/MOD44B').filterDate('2018-01-01','2018-12-31').select('Percent_Tree_Cover');
+
+var VCF_built = ee.ImageCollection('MODIS/006/MOD44B').filterDate(start_year+'-01-01', end_year+'-12-31')
+                 .select('Percent_Tree_Cover');//.first()
+        //.select(['Percent_Tree_Cover','Percent_NonTree_Vegetation','Percent_NonVegetated']);
+print ('VCF_built',VCF_built);
+
+var CloudDay = ee.ImageCollection('MODIS/006/MYD11A1')
+            .filterDate(start_year+'-01-01', end_year+'-12-31')
+            .select('Clear_day_cov')  //
+        
+var CloudNig = ee.ImageCollection('MODIS/006/MYD11A1')
+            .filterDate(start_year+'-01-01', end_year+'-12-31')
+            .select('Clear_night_cov')
+
+// var GHSL = ee.Image("JRC/GHSL/P2016/BUILT_LDSMT_GLOBE_V1").select('cnfd');
+// print('ghsl',GHSL)
+
+var visualization = {
+  // bands: ['Percent_NonVegetated'],
+  min: 0.0,
+  max: 100.0,
+  palette: ['bbe029', '0a9501', '074b03']
+};
+
+
+// define a clip function of single image
+function clipImg(image){
+  return image.clipToCollection(global_urban).multiply(0.01);
+}
+
+var City_built = VCF_built.map(clipImg);
+var City_built = City_built.first();
+
+print ('City_built',City_built);
+
+// define a clip function of single image
+function clipImg(image){
+  return image.clipToCollection(global_urban).multiply(0.0005);
+}
+
+var City_cloudd = CloudDay.map(clipImg);
+var City_cloudd = City_cloudd.first();
+// print ('City_cloud',City_cloud);
+
+// define a clip function of single image
+function clipImg(image){
+  return image.clipToCollection(global_urban).multiply(0.0005);
+}
+
+var City_cloudn = CloudNig.map(clipImg);
+var City_cloudn = City_cloudn.first();
+// print ('City_cloud',City_cloud);
+
+// Map.addLayer(City_built,visualization,"clip ImgCol");
+
+var City_built_class=ee.Image(0).where(City_built.lte(0.05),1)
+                     .where(City_built.gt(0.05).and(City_built.lte(0.1)), 2)
+                     .where(City_built.gt(0.1).and(City_built.lte(0.15)), 3)
+                     .where(City_built.gt(0.15).and(City_built.lte(0.2)), 4)
+                     .where(City_built.gt(0.2).and(City_built.lte(0.25)), 5)
+                     .where(City_built.gt(0.25).and(City_built.lte(0.3)), 6)
+                     .where(City_built.gt(0.3).and(City_built.lte(0.35)), 7)
+                     .where(City_built.gt(0.35).and(City_built.lte(0.4)), 8)
+                     .where(City_built.gt(0.4).and(City_built.lte(0.45)), 9)
+                     .where(City_built.gt(0.45).and(City_built.lte(0.5)), 10)
+                     .where(City_built.gt(0.5).and(City_built.lte(0.55)), 11)
+                     .where(City_built.gt(0.55).and(City_built.lte(0.6)), 12)
+                     .where(City_built.gt(0.6).and(City_built.lte(0.65)), 13)
+                     .where(City_built.gt(0.65).and(City_built.lte(0.7)), 14)
+                     .where(City_built.gt(0.7).and(City_built.lte(0.75)), 15)
+                    // .where(City_built.gt(0.75).and(City_built.lte(0.8)), 13)
+                    // .where(City_built.gt(0.8).and(City_built.lte(0.85)), 14)
+                     .where(City_built.gt(0.75), 16)//.clip(global_urban);
+print(City_built_class,'City_built_class');
+
+// var City_built_classes = ee.List([1, 2, 3, 4, 5])
+//   .map(function(n) {
+//     var classImage = City_built_class.eq(ee.Number(n));
+//     var vectors = classImage.updateMask(classImage)
+//       .reduceToVectors({
+//         reducer: ee.Reducer.countEvery(), 
+//         geometry: global_urban, 
+//         scale: 1000,
+//         maxPixels: 1e8})
+//       .geometry();
+//     return ee.Feature(vectors, {"class": n});
+//   });
+
+//var City_built_classes = ee.FeatureCollection(City_built_classes);
+// print(City_built_classes,'City_built_classes');
+// Map.addLayer(City_built_classes,{},'City_built_classes');
+
+var sample_use1 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(1);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',1);
+});
+print('sample_use1', sample_use1);
+var sample_use2 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(2);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',2);
+})
+var sample_use3 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(3);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',3);
+})
+var sample_use4 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(4);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',4);
+})
+var sample_use5 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(5);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',5);
+})
+
+var sample_use6 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(6);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',6);
+});
+// print('sample_use1', sample_use1)
+var sample_use7 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(7);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',7);
+})
+var sample_use8 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(8);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',8);
+})
+var sample_use9 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(9);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',9);
+})
+var sample_use10 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(10);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',10);
+})
+
+var sample_use11 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(11);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',11);
+});
+// print('sample_use1', sample_use1)
+var sample_use12 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(12);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',12);
+})
+var sample_use13 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(13);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',13);
+})
+var sample_use14 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(14);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',14);
+})
+var sample_use15 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(15);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',15);
+})
+
+var sample_use16 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(16);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',16);
+})
+var sample_use = ee.FeatureCollection(sample_use1.merge(sample_use2).merge(sample_use3).merge(sample_use4).merge(sample_use5)
+                                    .merge(sample_use6).merge(sample_use7).merge(sample_use8).merge(sample_use9).merge(sample_use10)
+                                    .merge(sample_use11).merge(sample_use12).merge(sample_use13)
+                                    .merge(sample_use14).merge(sample_use15).merge(sample_use16));
+// print('sample_use',sample_use)
+
+var monthCol = ee.List.sequence(1,12,1).map(function(n){
+  var LST_monthMean = LST.filter(ee.Filter.calendarRange(n,n,'month'))   //LST OR NoCloud
+                    .mean().multiply(0.02).updateMask(mask)//.subtract(273.15)//.copyProperties(LST)
+                    //.clip(roi);
+                    
+  var NDVI_monthMean = NDVI.filter(ee.Filter.calendarRange(n,n,'month'))
+                      .mean().multiply(0.0001).updateMask(mask)
+  var EVI_monthMean = EVI.filter(ee.Filter.calendarRange(n,n,'month'))
+                      .mean().multiply(0.0001).updateMask(mask)                    
+  var Albedo_monthMean = meanWSA.filter(ee.Filter.calendarRange(n,n,'month'))
+                      .mean().multiply(0.001).updateMask(mask)                 
+                    .set('system:time_start',NDVI.get('system:time_start'));
+  var LST_day = LST_monthMean.select('LST_Day_1km').rename('LSTday');
+  var LST_night = LST_monthMean.select('LST_Night_1km').rename('LSTnight');
+
+  //白天和夜间地表温差
+  var DTR = LST_day.subtract(LST_night);
+  var DTR1 = DTR.updateMask(DTR.gt(0));
+  var LST_day1 = LST_day.updateMask(DTR1);
+  var LST_night1 = LST_night.updateMask(DTR1);
+  
+  var VCF_tree1 = VCF.mean().select('Percent_Tree_Cover').rename('VCF_t');
+  var VCF_nontree1 = VCF.mean().select('Percent_NonTree_Vegetation').rename('VCF_nont');
+  var VCF_built = VCF.mean().select('Percent_NonVegetated').rename('VCF_built');
+  var NDVI1 = NDVI_monthMean.select('NDVI').rename('NDVI');
+  var EVI1 = EVI_monthMean.select('EVI').rename('EVI');
+  var WSA1 = Albedo_monthMean.select('meanWSA').rename('WSA');
+
+  return LST_day1.addBands(LST_night1).addBands(VCF_tree1) //.addBands(EVI1).addBands(VCF_tree1).addBands(VCF_nontree1).addBands(VCF_built).addBands(WSA1);                     
+});
+var monthCol = ee.ImageCollection.fromImages(monthCol);
+print("monthCol:",  monthCol);
+print("monthCol first:",  monthCol.first());
+
+// 定义LST调色板
+var landSurfaceTemperatureVis = {
+  min: 250.0,
+  max: 300.0,
+  palette: [
+    '040274', '040281', '0502a3', '0502b8', '0502ce', '0502e6',
+    '0602ff', '235cb1', '307ef3', '269db1', '30c8e2', '32d3ef',
+    '3be285', '3ff38f', '86e26f', '3ae237', 'b5e22e', 'd6e21f',
+    'fff705', 'ffd611', 'ffb613', 'ff8b13', 'ff6e08', 'ff500d',
+    'ff0000', 'de0101', 'c21301', 'a71001', '911003'
+  ],
+};    
+//Map.addLayer(monthCol.first().select('LSTday'),landSurfaceTemperatureVis,'LST_day');
+//Map.addLayer(LST_night,landSurfaceTemperatureVis,'LST_night');
+
+var LSTmonthCol =monthCol.toBands();
+print('LSTmonthCol',LSTmonthCol);
+
+//change sample_use or global_urban
+var Values = sample_use.map(function(fea){
+  var currentFeature = ee.Feature(fea);
+  //计算每个urban的高程中位数,返回一个FeatureCollection  
+  var elevation_eachUrban_ascending = elevation.reduceRegion({
+    reducer: ee.Reducer.median(),
+    geometry: currentFeature.geometry(),
+    scale: 1000
+  });
+  var elevationMedian = ee.Number(elevation_eachUrban_ascending.get('elevation'));
+  
+  var null_flag = ee.Algorithms.If(elevationMedian,elevationMedian,9999);
+  
+  var eachUrban_eleMedian_neg50 = elevationMedian.subtract(50);
+
+  var eachUrban_eleMedian_pos50 = elevationMedian.add(50);
+  var urban_ele = elevation.clip(currentFeature).select('elevation');
+
+  //掩膜掉高程不在 eachUrban_eleMedian_neg50和 eachUrban_eleMedian_pos50的区域
+  var urban_ele1 = urban_ele.mask(urban_ele.gte(eachUrban_eleMedian_neg50).eq(1)).mask(urban_ele.lte(eachUrban_eleMedian_pos50).eq(1));
+  var zero_img = ee.Image.constant(0); 
+  var mask_dem = ee.Algorithms.If(elevationMedian,urban_ele1,zero_img)
+  var curLSTmonthCol = LSTmonthCol.updateMask(mask_dem);
+  var values = curLSTmonthCol.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: currentFeature.geometry(),
+    scale: 1000,
+    maxPixels: 10e12,
+    tileScale:4
+  });
+  // Calculate regression coefficients for the set of pixels intersecting the
+  // above defined region using reduceRegion with ee.Reducer.linearFit()
+  var GHSL = City_built.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: currentFeature.geometry(),
+    scale: 1000
+  });
+  
+  var Cloudd = City_cloudd.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: currentFeature.geometry(),
+    scale: 250
+  });
+  
+  var Cloudn = City_cloudn.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: currentFeature.geometry(),
+    scale: 250
+  });
+  
+  var outFeature=ee.Feature(null).set('0_FID', currentFeature.get('ORIG_FID')).set('class', currentFeature.get('class'))
+                                 .set('VCF_tree',GHSL.get('Percent_Tree_Cover'));
+                                 //.set('CloudDay',Cloudd.get('Clear_day_cov'))
+                                 //.set('CloudNig',Cloudn.get('Clear_night_cov'));
+  // for(var i=0;i<12;i++)
+  // {
+  //   var lstDayBand=i+'_LSTday';
+  //   var lstNightBand=i+'_LSTnight';
+  //   // var ndviBand=i+'_NDVI';
+  //   // var eviBand=i+'_EVI';
+  //   var VCF_tBand=i+'_VCF_t';
+  //   var VCF_nontBand=i+'_VCF_nont';
+  //   var VCF_builtBand=i+'_VCF_built';
+  //   var EVIBand =i+'_EVI';
+  //   var WSABand =i+'_WSA';
+  //   //去掉这部分注释，计算built回归
+  //   // var linearFit1 = curLSTmonthCol.select([VCF_builtBand,lstDayBand]).reduceRegion({
+  //   //   reducer: ee.Reducer.linearFit(),
+  //   //   geometry: currentFeature.geometry(),
+  //   //   scale: 1000,
+  //   // }).get('scale'); 
+  //   // outFeature=outFeature.set('month_'+i+'_day',linearFit1);
+  //   // var linearFit2 = curLSTmonthCol.select([VCF_builtBand,lstNightBand]).reduceRegion({
+  //   //     reducer: ee.Reducer.linearFit(),
+  //   //     geometry: currentFeature.geometry(),
+  //   //     scale: 1000,
+  //   // }).get('scale'); 
+  //   // outFeature=outFeature.set('month_'+i+'_night',linearFit2);
+  //   //去掉这部分注释，计算tree回归
+  //   var linearFit3 = curLSTmonthCol.select([VCF_tBand,lstDayBand]).reduceRegion({
+  //       reducer: ee.Reducer.linearFit(),
+  //       geometry: currentFeature.geometry(),
+  //       scale: 1000,
+  //       // tileScale:4,
+  //   }).get('scale'); 
+  //     outFeature=outFeature.set('month_'+i+'_day',linearFit3);
+  //   // outFeature=outFeature.set('month_'+i+'_day_scale',linearFit3.get('scale')).set('month_'+i+'_day_intercept',linearFit3.get('offset'));
+  //   var linearFit4 = curLSTmonthCol.select([VCF_tBand,lstNightBand]).reduceRegion({
+  //       reducer: ee.Reducer.linearFit(),
+  //       geometry: currentFeature.geometry(),
+  //       scale: 1000,
+  //       // tileScale:4,
+  //   }).get('scale'); 
+  //     outFeature=outFeature.set('month_'+i+'_nig',linearFit4);
+  //   // outFeature=outFeature.set('month_'+i+'_nig_scale',linearFit4.get('scale')).set('month_'+i+'_nig_intercept',linearFit4.get('offset'));
+    
+  //       //去掉这部分注释，计算evi回归
+  //   // var linearFit5 = curLSTmonthCol.select([lstDayBand,EVIBand]).reduceRegion({
+  //   //     reducer: ee.Reducer.linearFit(),
+  //   //     geometry: currentFeature.geometry(),
+  //   //     scale: 1000,
+  //   //     tileScale:4,
+  //   // }).get('scale'); 
+  //   // outFeature=outFeature.set('month_'+i+'_day',linearFit5);
+  //   // var linearFit6 = curLSTmonthCol.select([lstNightBand,EVIBand]).reduceRegion({
+  //   //     reducer: ee.Reducer.linearFit(),
+  //   //     geometry: currentFeature.geometry(),
+  //   //     scale: 1000,
+  //   //     tileScale:4,
+  //   // }).get('scale'); 
+  //   // outFeature=outFeature.set('month_'+i+'_night',linearFit6);
+  //     // 去掉这部分注释，计算albedio回归
+  //   // var linearFit7 = curLSTmonthCol.select([lstDayBand,WSABand]).reduceRegion({
+  //   //     reducer: ee.Reducer.linearFit(),
+  //   //     geometry: currentFeature.geometry(),
+  //   //     scale: 1000,
+  //   //     tileScale:4,
+  //   // }).get('scale'); 
+  //   // outFeature=outFeature.set('month_'+i+'_day',linearFit7);
+  //   // var linearFit8 = curLSTmonthCol.select([lstNightBand,WSABand]).reduceRegion({
+  //   //     reducer: ee.Reducer.linearFit(),
+  //   //     geometry: currentFeature.geometry(),
+  //   //     scale: 1000,
+  //   //     tileScale:4,
+  //   // }).get('scale'); 
+  //   // outFeature=outFeature.set('month_'+i+'_night',linearFit8);
+    
+  // }
+  return outFeature.set('null_flag',null_flag).set(values);
+});//.sort("ORIG_FID");
+// var Values2 = Values.sort("ORIG_FID");
+print("Values size", Values.limit(20));
+print("Values first:", Values.first());
+print("output_feature", Values);
+
+// // Inspect the results.
+// print('OLS estimates:', linearFit);
+// print('y-intercept:', linearFit.get('offset'));
+// print('Slope:', linearFit.get('scale'));
+
+Export.table.toDrive({
+  collection: ee.FeatureCollection(Values),
+  description: 'urbanS_2004',
+  // selectors: ["ORIG_FID","Tday_urban","Tday_rural","Tnig_urban","Tnig_rural","elevation"],
+  folder:"2000-2020_CE_urban",
+  fileFormat: 'CSV'
+});
