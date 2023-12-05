@@ -1,0 +1,190 @@
+
+
+
+
+
+var global_urban = ee.FeatureCollection("projects/ee-daisywangcl1/assets/ruralS").sort('ORIG_FID').select('ORIG_FID');
+print(global_urban)
+Map.addLayer(global_urban,{min:0,max:1e13,palette:"white,darkgreen"},"global_urban");
+
+var start_year = 2018;   //change
+var end_year = 2020;     //change
+
+var VCF = ee.ImageCollection('MODIS/006/MOD44B').filterDate(start_year+'-01-01', end_year+'-12-31')
+        .select(['Percent_Tree_Cover','Percent_NonTree_Vegetation','Percent_NonVegetated']);
+print ('VCF',VCF);
+
+var VCF_built = ee.ImageCollection('MODIS/006/MOD44B').filterDate(start_year+'-01-01', end_year+'-12-31')
+                 .select('Percent_Tree_Cover')//.mean();//.first()
+        //.select(['Percent_Tree_Cover','Percent_NonTree_Vegetation','Percent_NonVegetated']);
+print ('VCF_built',VCF_built);
+
+// var forest20201 = VCF_built.gt(10).and(VCF_built.lte(20))
+// var forest20202 = VCF_built.gt(40).and(VCF_built.lte(50))
+
+ 
+// 在地图上添加森林层
+// Map.addLayer(forest20201,{min:0,max:1,palette:"white,darkgreen"},"Forest 20201");
+// Map.addLayer(forest20202,{min:0,max:1,palette:"white,green"},"Forest 20202");
+
+// define a clip function of single image
+function clipImg(image){
+  return image.clipToCollection(global_urban).multiply(0.01);
+}
+
+var City_built = VCF_built.map(clipImg);
+var City_built = City_built.first();
+
+print ('City_built',City_built);
+// Map.addLayer(City_built,visualization,"clip ImgCol");
+
+//classify the city regions into two types
+var City_built_class=ee.Image(0).where(City_built.lte(0.1),1)
+                    .where(City_built.gt(0.1).and(City_built.lte(0.2)), 2)
+                    // .where(City_built.gt(0.15).and(City_built.lte(0.2)), 3)
+                    // .where(City_built.gt(0.2).and(City_built.lte(0.25)), 4)
+                    // .where(City_built.gt(0.25).and(City_built.lte(0.3)), 5)
+                    // .where(City_built.gt(0.3).and(City_built.lte(0.35)), 6)
+                    // .where(City_built.gt(0.35).and(City_built.lte(0.4)), 7)
+                    .where(City_built.gt(0.3).and(City_built.lte(0.4)), 3)
+                    .where(City_built.gt(0.4).and(City_built.lte(0.5)), 4)
+                    //.where(City_built.gt(0.5), 4)//.clip(global_urban);
+print(City_built_class,'City_built_class');
+
+
+var sample_use1 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(1);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',1);
+});
+print('sample_use1', sample_use1);
+
+var sample_use2 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(2);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',2);
+})
+
+var sample_use3 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(3);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',3);
+});
+
+var sample_use4 = global_urban.map(function(sample){
+  var orig_fid = sample.get('ORIG_FID');
+  var City_built_image = City_built_class.eq(4);
+  var vector = City_built_image.updateMask(City_built_image)
+    .reduceToVectors({
+      reducer: ee.Reducer.countEvery(),
+      geometry: sample.geometry(),
+      scale: 1000,
+      maxPixels: 1e8}).geometry();
+  return ee.Feature(vector).set('ORIG_FID',orig_fid).set('class',4);
+})
+
+var sample_use = ee.FeatureCollection(sample_use1.merge(sample_use2).merge(sample_use3).merge(sample_use4))//.merge(sample_use5)
+                                    //.merge(sample_use6).merge(sample_use7).merge(sample_use8).merge(sample_use9).merge(sample_use10)
+                                    //.merge(sample_use11).merge(sample_use12).merge(sample_use13).merge(sample_use14).merge(sample_use15));
+print('sample_use',sample_use)
+
+var raster_vis1 = {
+  "max": 1000.0,
+  "palette": [
+    "ffffe7",
+    "86a192",
+    "509791",
+    "307296",
+    "2c4484",
+    "000066"
+  ],
+  "min": 0.0
+};
+Map.setCenter(79.1, 19.81, 3);
+Map.addLayer(VCF, raster_vis1, 'Percent_Tree_Cover');
+
+// calculate pop of each regions
+// var clipToCol = function(image){
+//   return image.clip(sample_use);
+// };
+
+var worldpop = ee.ImageCollection("CIESIN/GPWv411/GPW_Population_Count")
+          //.filterBounds(sample_use)//.map(clipToCol)   //change
+          .filterDate(start_year+'-01-01', end_year+'-12-31')
+          .select('population_count').sum()
+print ('worldpop',worldpop)
+
+var raster_vis = {
+  "max": 1000.0,
+  "palette": [
+    "ffffe7",
+    "86a192",
+    "509791",
+    "307296",
+    "2c4484",
+    "000066"
+  ],
+  "min": 0.0
+};
+Map.setCenter(79.1, 19.81, 3);
+Map.addLayer(worldpop, raster_vis, 'basic_demographic_characteristics');
+
+var city_pop = worldpop.reduceRegions({
+    reducer: ee.Reducer.sum(),
+    collection: global_urban,    //change sample_use or global_urban
+    scale: 1000,
+    tileScale:4
+}).filter(ee.Filter.notNull(['sum']));
+print (city_pop)
+
+print("city_pop size", city_pop.limit(10));
+print("city_pop first:", city_pop.first());
+
+// //此功能是为了将每年的影像按照区域进行裁剪
+// var clipToCol = function(image){
+//   return image.clip(global_urban);
+// };
+
+// var worldpop = ee.ImageCollection("WorldPop/GP/100m/pop")
+//             .filterBounds(global_urban).map(clipToCol)
+//             .filterDate('2020-01-01','2020-12-31').select('population').mean()
+// // .filter(ee.Filter.eq('country', 'CHN')).select('population')
+
+// print(worldpop)
+// // set the start and end dates
+// // var start = ee.Date.fromYMD(2020,1,1);
+// // var end = ee.Date.fromYMD(2020,12,31);
+
+// var city_pop = worldpop.reduceRegions({
+//     reducer: ee.Reducer.sum(),
+//     collection: global_urban,
+//     scale: 1000,
+//     tileScale:4
+// }).filter(ee.Filter.notNull(['sum']));
+// print (city_pop)
+
+
+Export.table.toDrive({
+  collection: ee.FeatureCollection(city_pop),
+  description: 'global_S_pop',
+  folder:'R1-globalS-1000m',
+  fileFormat: 'CSV',
+});
